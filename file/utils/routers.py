@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
-from app.main import get_latest_assistant_response
+from app.chat import get_latest_assistant_response
 
 # Initialize the router
 router = APIRouter()

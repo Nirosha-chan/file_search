@@ -1,6 +1,12 @@
+from fastapi import FastAPI
 from app.api_requests import client 
 from app.thread import thread
+from utils.api import router
 import re
+
+app = FastAPI()
+
+app.include_router(router)
 
 # Function to get the latest assistant response
 def get_latest_assistant_response(thread):
