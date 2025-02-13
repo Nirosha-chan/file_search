@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from openai import AzureOpenAI
+from fastapi_app.routers import chat
 from pydantic import BaseModel
 import time
 import re
@@ -13,6 +14,7 @@ api_key = "fcaa6ab31d5048c38e309e029edc2721"
 api_version = "2024-08-01-preview"
 assistant_id = "asst_WrR5VTYyJH7IEUOJeioxOtzO"
 
+# Initialize AzureOpenAI client
 client = AzureOpenAI(
     azure_endpoint=endpoint,
     api_key=api_key,
@@ -34,11 +36,14 @@ def wait_on_run(run, thread_id):
     return run
 
 def get_latest_assistant_response(thread_id):
-    """Retrieve and clean the assistant’s response"""
+    """Retrieve and clean the assistant response"""
     messages = client.beta.threads.messages.list(thread_id=thread_id, order="desc")
     for msg in messages.data:
-        if msg.role == "assistant" and msg.content and isinstance(msg.content, list):
-            response_text = msg.content[0].text.value
+        if msg.role == "assistant" and hasattr(msg, 'content') and msg.content:
+            if isinstance(msg.content, list):
+                response_text = msg.content[0].text.value
+            else:
+                response_text = msg.content
             cleaned_response = re.sub(r"【\d+:\d+†source】", "", response_text)
             return cleaned_response
     return None
@@ -72,5 +77,6 @@ def send_message(user_msg: UserMessage):
 
     # Retrieve response
     assistant_response = get_latest_assistant_response(thread_id)
+    if assistant_response is None:
+        raise HTTPException(status_code=500, detail="Failed to retrieve assistant response")
     return {"assistant_response": assistant_response}
-
