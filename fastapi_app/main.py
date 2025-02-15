@@ -9,8 +9,8 @@ import re
 app = FastAPI()
 
 # Azure OpenAI Client Configuration
-endpoint = "https://oai-assistantapi-poc.openai.azure.com/"
-api_key = "fcaa6ab31d5048c38e309e029edc2721"
+endpoint = "AZURE_ENDPOINT_URL"
+api_key = "AZURE_API_KEY"
 api_version = "2024-08-01-preview"
 assistant_id = "asst_WrR5VTYyJH7IEUOJeioxOtzO"
 
