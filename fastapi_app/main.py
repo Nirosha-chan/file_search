@@ -1,99 +1,95 @@
 from fastapi import FastAPI, HTTPException
-from openai import AzureOpenAI
 from pydantic import BaseModel
 from typing import Optional, List
+import os
 import time
 import re
+from openai import AzureOpenAI
 
-# Initialize FastAPI app
+# Initialize FastAPI
 app = FastAPI()
 
-# Azure OpenAI Client Configuration
-endpoint = "AZURE_ENDPOINT_URL"  # Replace with your endpoint
-api_key = "AZURE_API_KEY"                # Replace with your API key
-api_version = "2024-08-01-preview"
-assistant_id = "asst_WrR5VTYyJH7IEUOJeioxOtzO"
+# Fetch Environment Variables
+endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+api_key = os.getenv("AZURE_OPENAI_API_KEY")
+api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+assistant_id = os.getenv("ASSISTANT_ID")
 
-# Initialize AzureOpenAI client
+# Initialize Azure OpenAI client
 client = AzureOpenAI(
     azure_endpoint=endpoint,
     api_key=api_key,
     api_version=api_version
 )
 
-# Define Pydantic models
+# Pydantic Models (No `assistant_id` in request schema)
 class Message(BaseModel):
     role: str
     content: str
 
 class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
-    assist_id: str
     messages: List[Message]
 
 class ChatResponse(BaseModel):
     thread_id: str
+    message_id: str
+    role: str
     content: Optional[str]
 
-# Helper function to wait for the assistant's response
+# Function to Wait for Assistant Response
 def wait_for_response(thread_id, run_id):
-    """Wait for the assistant's response and retrieve only the content."""
     while True:
         run = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run_id)
         if run.status not in ["queued", "in_progress"]:
             break
         time.sleep(0.5)
 
-    # Retrieve the latest assistant message
     messages = client.beta.threads.messages.list(thread_id=thread_id, order="desc")
     for msg in messages.data:
         if msg.role == "assistant" and hasattr(msg, 'content') and msg.content:
             response_text = (
                 msg.content[0].text.value if isinstance(msg.content, list) else msg.content
             )
-            # Clean up any unwanted patterns from the response
-            cleaned_response = re.sub(r"【\\d+:\\d+†source】", "", response_text)
-            return cleaned_response
-    return None
+            cleaned_response = re.sub(r"【\d+:\d+†source】", "", response_text)
+            return cleaned_response, msg.id
+    return None, None
 
-# Single endpoint to handle chat and manage thread creation
+# Chat API Endpoint (Assistant ID Removed from Request)
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
-    """
-    Handles chat requests by:
-    - Creating a thread if thread_id isn't provided.
-    - Sending user messages.
-    - Returning only the thread_id and content in the response.
-    """
     try:
-        # Create a new thread if one isn't provided
-        if not request.thread_id:
-            thread = client.beta.threads.create()
-            thread_id = thread.id
-        else:
-            thread_id = request.thread_id
+        if not assistant_id:
+            raise HTTPException(status_code=500, detail="ASSISTANT_ID is not set.")
 
-        # Process each user message
+        # Create a new thread if not provided
+        thread_id = request.thread_id or client.beta.threads.create().id
+
+        # Process user messages
         for message in request.messages:
             client.beta.threads.messages.create(
                 thread_id=thread_id,
                 role=message.role,
                 content=message.content,
             )
-            # Run the assistant for the new message
-            run = client.beta.threads.runs.create(thread_id=thread_id, assistant_id=request.assist_id)
-            wait_for_response(thread_id, run.id)  # Wait for assistant's run to complete
 
-        # Retrieve only the assistant's content after the run completes
-        assistant_response = wait_for_response(thread_id, run.id)
+        # Run the assistant (Assistant ID is set internally)
+        run = client.beta.threads.runs.create(
+            thread_id=thread_id,
+            assistant_id=assistant_id  # Passed internally, never in request
+        )
 
-        if assistant_response:
+        assistant_response, message_id = wait_for_response(thread_id, run.id)
+
+        if assistant_response and message_id:
             return ChatResponse(
                 thread_id=thread_id,
+                message_id=message_id,
+                role="assistant",
                 content=assistant_response
             )
         else:
             raise HTTPException(status_code=404, detail="No response from assistant.")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
